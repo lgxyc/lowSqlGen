@@ -15,29 +15,29 @@ type DBConfigDialog struct {
 
 func NewDBConfigDialog(parent fyne.Window) *DBConfigDialog {
 	dialog := &DBConfigDialog{
-		window: fyne.CurrentApp().NewWindow("数据库连接配置"),
+		window: fyne.CurrentApp().NewWindow("Database Connection Configuration"),
 		config: &model.DatabaseConfig{},
 	}
 
 	// 创建输入框
 	hostEntry := widget.NewEntry()
-	hostEntry.SetPlaceHolder("localhost")
+	hostEntry.SetText("127.0.0.1")
 
 	portEntry := widget.NewEntry()
-	portEntry.SetPlaceHolder("3306")
+	portEntry.SetText("3306")
 
 	usernameEntry := widget.NewEntry()
-	usernameEntry.SetPlaceHolder("root")
+	usernameEntry.SetText("root")
 
 	passwordEntry := widget.NewPasswordEntry()
-
+	passwordEntry.SetText("root")
 	// 创建表单
 	form := &widget.Form{
 		Items: []*widget.FormItem{
-			{Text: "主机地址", Widget: hostEntry},
-			{Text: "端口", Widget: portEntry},
-			{Text: "用户名", Widget: usernameEntry},
-			{Text: "密码", Widget: passwordEntry},
+			{Text: "Host", Widget: hostEntry},
+			{Text: "Port", Widget: portEntry},
+			{Text: "Username", Widget: usernameEntry},
+			{Text: "Password", Widget: passwordEntry},
 		},
 		OnSubmit: func() {
 			dialog.config.Host = hostEntry.Text

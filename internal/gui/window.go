@@ -2,33 +2,142 @@ package gui
 
 import (
 	"fmt"
+	"strings"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/widget"
 	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/widget"
 	"github.com/lowSqlGen/internal/model"
 	"github.com/lowSqlGen/internal/service"
 )
 
 type MainWindow struct {
-	window     fyne.Window
-	canvas     *Canvas
-	leftBar    *widget.List
-	rightBar   *widget.TextArea
-	dbConfig   *model.DatabaseConfig
-	dbService  *service.DatabaseService
+	window    fyne.Window
+	canvas    *Canvas
+	leftBar   *widget.Tree
+	rightBar  *widget.Entry
+	dbConfig  *model.DatabaseConfig
+	dbService service.DatabaseService
+	dbTables  map[string][]string
 }
 
 func InitMainWindow(window fyne.Window) *MainWindow {
 	mainWindow := &MainWindow{
 		window:   window,
-		canvas:   NewCanvas(),
-		leftBar:  widget.NewList(nil, nil, nil),
-		rightBar: widget.NewTextArea(),
+		rightBar: widget.NewEntry(),
+		dbTables: make(map[string][]string),
 	}
 
+	// 修改画布初始化方式
+	mainWindow.canvas = NewCanvas(nil, nil)
+	mainWindow.canvas.container.Resize(fyne.NewSize(800, 600))
+
+	// 添加变量来跟踪状态
+	var firstTable bool = true   // 是否是第一个表
+	var currentAddedTable string // 当前添加的表
+
+	// 修改树形结构的创建
+	mainWindow.leftBar = widget.NewTree(
+		func(id widget.TreeNodeID) []widget.TreeNodeID {
+			if id == "" {
+				// root节点返回所有数据库
+				return mainWindow.getDatabases()
+			}
+			// 数据库节点返回其包含的表
+			if tables, ok := mainWindow.dbTables[id]; ok {
+				var nodeIDs []widget.TreeNodeID
+				for _, table := range tables {
+					nodeIDs = append(nodeIDs, id+"/"+table)
+				}
+				return nodeIDs
+			}
+			return nil
+		},
+		func(id widget.TreeNodeID) bool {
+			// 如果是数据库节点则返回true
+			return !strings.Contains(id, "/")
+		},
+		func(branch bool) fyne.CanvasObject {
+			if branch {
+				return widget.NewLabel("Template")
+			}
+			// 为表节点创建一个容器，包含标签和按钮
+			label := widget.NewLabel("Template")
+			btn := widget.NewButton("Add", nil)
+			return container.NewBorder(nil, nil, nil, btn, label)
+		},
+		func(id widget.TreeNodeID, branch bool, node fyne.CanvasObject) {
+			if branch {
+				label := node.(*widget.Label)
+				label.SetText(id)
+				return
+			}
+
+			// 表节点
+			cont := node.(*fyne.Container)
+			label := cont.Objects[0].(*widget.Label)
+			btn := cont.Objects[1].(*widget.Button)
+
+			parts := strings.Split(id, "/")
+			dbName := parts[0]
+			tableName := parts[1]
+
+			// 设置表名和注释
+			if mainWindow.dbService != nil {
+				comment := mainWindow.dbService.GetTableComment(dbName, tableName)
+				if comment != "" {
+					label.SetText(fmt.Sprintf("%s // %s", tableName, comment))
+				} else {
+					label.SetText(tableName)
+				}
+			} else {
+				label.SetText(tableName)
+			}
+
+			// 根据状态设置按钮
+			if currentAddedTable == tableName {
+				btn.SetText("Cancel")
+				btn.OnTapped = func() {
+					// 清空设计区域
+					mainWindow.canvas.Clear()
+					// 重置状态
+					currentAddedTable = ""
+					firstTable = true
+					// 刷新树以更新所有按钮
+					mainWindow.leftBar.Refresh()
+				}
+			} else {
+				btn.SetText("Add")
+				if firstTable || currentAddedTable == "" {
+					btn.Show()
+				} else {
+					btn.Hide()
+				}
+				btn.OnTapped = func() {
+					columns, err := mainWindow.dbService.GetColumns(dbName, tableName)
+					if err != nil {
+						dialog.ShowError(err, mainWindow.window)
+						return
+					}
+					mainWindow.canvas.AddTable(tableName, columns)
+					mainWindow.window.Canvas().Refresh(mainWindow.canvas.container)
+
+					// 更新状态
+					currentAddedTable = tableName
+					firstTable = false
+					// 刷新树以更新所有按钮
+					mainWindow.leftBar.Refresh()
+				}
+			}
+		},
+	)
+
+	// 删除原来的 OnSelected 事件处理
+	mainWindow.leftBar.OnSelected = nil
+
 	// 创建数据库连接按钮
-	connectBtn := widget.NewButton("连接数据库", func() {
+	connectBtn := widget.NewButton("Click here to Connect to Database", func() {
 		dialog := NewDBConfigDialog(window)
 		dialog.SetOnSubmit(func(config *model.DatabaseConfig) {
 			mainWindow.dbConfig = config
@@ -38,101 +147,112 @@ func InitMainWindow(window fyne.Window) *MainWindow {
 	})
 
 	// 创建生成SQL按钮
-	generateBtn := widget.NewButton("生成SQL", func() {
+	generateBtn := widget.NewButton("Generate SQL", func() {
 		mainWindow.generateSQL()
 	})
 
-	// 创建左侧数据库列表
+	// 创建左侧面板
 	leftContainer := container.NewVBox(
 		connectBtn,
-		widget.NewLabel("数据库列表"),
-		mainWindow.leftBar,
+		widget.NewLabel("Databases & Tables"),
 	)
+
+	// 创建一个滚动容器来包装树形结构
+	treeScroll := container.NewVScroll(mainWindow.leftBar)
+	treeScroll.SetMinSize(fyne.NewSize(200, 600)) // 设置最小高度
+
+	leftContainer.Add(treeScroll)
 
 	// 创建中间画布
 	centerContainer := container.NewVBox(
-		widget.NewLabel("设计区域"),
-		mainWindow.canvas.container,
+		widget.NewLabel("Design Area"),
+		container.NewPadded(mainWindow.canvas.container), // 添加内边距
 	)
+
+	// 设置中间容器的最小大小
+	centerContainer.Resize(fyne.NewSize(800, 600))
 
 	// 创建右侧SQL预览
+	mainWindow.rightBar.MultiLine = true             // 启用多行模式
+	mainWindow.rightBar.Wrapping = fyne.TextWrapWord // 启用自动换行
+
+	// 创建一个滚动容器来包装SQL预览
+	sqlScroll := container.NewVScroll(mainWindow.rightBar)
+	sqlScroll.SetMinSize(fyne.NewSize(200, 600)) // 设置最小高度
+
 	rightContainer := container.NewVBox(
-		widget.NewLabel("SQL预览"),
+		widget.NewLabel("SQL Preview"),
 		generateBtn,
-		mainWindow.rightBar,
+		sqlScroll, // 使用滚动容器替代直接的文本框
 	)
 
-	// 创建主布局
+	// 创建主布局，调整比例
 	split := container.NewHSplit(
-		leftContainer,
+		leftContainer, // 移除额外的 HBox 容器
 		container.NewHSplit(
 			centerContainer,
 			rightContainer,
 		),
 	)
+	split.SetOffset(0.2) // 左侧面板占20%
+
+	// 设置右侧分割比例
+	rightSplit := split.Trailing.(*container.Split)
+	rightSplit.SetOffset(0.7) // 设计区域占70%，SQL预览占30%
 
 	window.SetContent(split)
-	
+	window.Resize(fyne.NewSize(1200, 800)) // 设置更大的默认窗口大小
+
 	return mainWindow
 }
 
+// 获取所有数据库名称
+func (m *MainWindow) getDatabases() []widget.TreeNodeID {
+	var databases []widget.TreeNodeID
+	for db := range m.dbTables {
+		databases = append(databases, widget.TreeNodeID(db))
+	}
+	return databases
+}
+
 func (m *MainWindow) connectToDatabase() {
-	// 创建数据库服务
 	dbService, err := service.NewDatabaseService(m.dbConfig)
 	if err != nil {
 		dialog.ShowError(err, m.window)
 		return
 	}
-	
-	m.dbService = dbService
-	
-	// 获取数据库列表
-	databases, err := dbService.GetDatabases()
-	if err != nil {
-		dialog.ShowError(err, m.window)
-		return
-	}
-	
-	// 更新左侧数据库列表
-	m.leftBar.Length = func() int {
-		return len(databases)
-	}
-	
-	m.leftBar.CreateItem = func() fyne.CanvasObject {
-		return widget.NewLabel("Template")
-	}
-	
-	m.leftBar.UpdateItem = func(id widget.ListItemID, item fyne.CanvasObject) {
-		item.(*widget.Label).SetText(databases[id])
-	}
-	
-	m.leftBar.OnSelected = func(id widget.ListItemID) {
-		m.loadDatabaseTables(databases[id])
-	}
-	
-	m.leftBar.Refresh()
-}
 
-func (m *MainWindow) loadDatabaseTables(dbName string) {
-	// 清空现有的表显示
-	m.canvas.Clear()
-	
-	// 获取表列表
-	tables, err := m.dbService.GetTables(dbName)
+	m.dbService = dbService
+	// 修改 connectToDatabase 中的画布重新创建部分
+	m.canvas = NewCanvas(dbService, m.dbConfig)
+	m.canvas.container.Resize(fyne.NewSize(800, 600))
+
+	// 刷新中间容器
+	if centerContainer, ok := m.window.Content().(*container.Split).Trailing.(*container.Split).Leading.(*fyne.Container); ok {
+		centerContainer.Objects[1] = container.NewPadded(m.canvas.container)
+		centerContainer.Refresh()
+	}
+
+	// 获取数据库列表
+	databases, err := m.dbService.GetDatabases()
 	if err != nil {
 		dialog.ShowError(err, m.window)
 		return
 	}
-	
-	// 为每个表获取列信息并显示
-	for _, tableName := range tables {
-		columns, err := m.dbService.GetColumns(dbName, tableName)
+
+	// 获取每个数据库的表
+	for _, dbName := range databases {
+		tables, err := m.dbService.GetTables(dbName)
 		if err != nil {
 			dialog.ShowError(err, m.window)
 			continue
 		}
-		m.canvas.AddTable(tableName, columns)
+		m.dbTables[dbName] = tables
+		m.dbConfig.CurrentDB = dbName
 	}
+
+	// 刷新界面
+	m.leftBar.Refresh()
 }
 
 func (m *MainWindow) generateSQL() {
@@ -142,7 +262,7 @@ func (m *MainWindow) generateSQL() {
 	// 设置主表
 	mainTable := m.canvas.GetMainTable()
 	if mainTable == "" {
-		dialog.ShowError(fmt.Errorf("请先添加表"), m.window)
+		dialog.ShowError(fmt.Errorf("Please add a table first"), m.window)
 		return
 	}
 	generator.SetMainTable(mainTable)
@@ -150,7 +270,7 @@ func (m *MainWindow) generateSQL() {
 	// 添加选中的列
 	selectedColumns := m.canvas.GetAllSelectedColumns()
 	if len(selectedColumns) == 0 {
-		dialog.ShowError(fmt.Errorf("请选择要查询的列"), m.window)
+		dialog.ShowError(fmt.Errorf("Please select the columns to query"), m.window)
 		return
 	}
 	for table, columns := range selectedColumns {
@@ -177,4 +297,4 @@ func (m *MainWindow) generateSQL() {
 
 	// 显示生成的SQL
 	m.rightBar.SetText(sql)
-} 
+}

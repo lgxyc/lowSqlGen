@@ -2,11 +2,12 @@ package model
 
 // DatabaseConfig 数据库连接配置
 type DatabaseConfig struct {
-	Host     string
-	Port     string
-	Username string
-	Password string
-	Database string
+	Host      string
+	Port      string
+	Username  string
+	Password  string
+	Database  string
+	CurrentDB string
 }
 
 // Table 表结构
@@ -20,4 +21,4 @@ type Column struct {
 	Name     string
 	Type     string
 	Selected bool
-} 
+}

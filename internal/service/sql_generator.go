@@ -14,15 +14,15 @@ type JoinInfo struct {
 
 type SQLGenerator struct {
 	selectedColumns map[string][]string // 表名 -> 选中的列
-	joins          []JoinInfo
-	mainTable      string              // 主表（第一个表）
-	tableAliases   map[string]string   // 表名 -> 别名
+	joins           []JoinInfo
+	mainTable       string            // 主表（第一个表）
+	tableAliases    map[string]string // 表名 -> 别名
 }
 
 func NewSQLGenerator() *SQLGenerator {
 	return &SQLGenerator{
 		selectedColumns: make(map[string][]string),
-		tableAliases:   make(map[string]string),
+		tableAliases:    make(map[string]string),
 	}
 }
 
@@ -45,7 +45,7 @@ func (g *SQLGenerator) AddJoin(sourceTable, targetTable, sourceColumn, targetCol
 		SourceColumn: sourceColumn,
 		TargetColumn: targetColumn,
 	})
-	
+
 	// 确保两个表都有别名
 	if _, exists := g.tableAliases[targetTable]; !exists {
 		g.tableAliases[targetTable] = fmt.Sprintf("t%d", len(g.tableAliases)+1)
@@ -62,7 +62,7 @@ func (g *SQLGenerator) GenerateSQL() (string, error) {
 	for tableName, columns := range g.selectedColumns {
 		alias := g.tableAliases[tableName]
 		for _, col := range columns {
-			selectClauses = append(selectClauses, 
+			selectClauses = append(selectClauses,
 				fmt.Sprintf("%s.%s", alias, col))
 		}
 	}
@@ -76,7 +76,7 @@ func (g *SQLGenerator) GenerateSQL() (string, error) {
 	for _, join := range g.joins {
 		sourceAlias := g.tableAliases[join.SourceTable]
 		targetAlias := g.tableAliases[join.TargetTable]
-		
+
 		joinClauses = append(joinClauses, fmt.Sprintf(
 			"LEFT JOIN %s %s ON %s.%s = %s.%s",
 			join.TargetTable, targetAlias,
@@ -97,4 +97,4 @@ func (g *SQLGenerator) GenerateSQL() (string, error) {
 	}
 
 	return sql + ";", nil
-} 
+}
