@@ -20,22 +20,21 @@ type MainWindow struct {
 	dbConfig  *model.DatabaseConfig
 	dbService service.DatabaseService
 	dbTables  map[string][]string
+	firstTable       bool
+	currentAddedTable string
 }
 
 func InitMainWindow(window fyne.Window) *MainWindow {
 	mainWindow := &MainWindow{
-		window:   window,
-		rightBar: widget.NewEntry(),
-		dbTables: make(map[string][]string),
+		window:           window,
+		rightBar:         widget.NewEntry(),
+		dbTables:        make(map[string][]string),
+		firstTable:      true,  // Initialize state
+		currentAddedTable: "",
 	}
 
-	// 修改画布初始化方式
-	mainWindow.canvas = NewCanvas(nil, nil)
-	mainWindow.canvas.container.Resize(fyne.NewSize(800, 600))
-
-	// 添加变量来跟踪状态
-	var firstTable bool = true   // 是否是第一个表
-	var currentAddedTable string // 当前添加的表
+	// Remove local state variables and use struct fields instead
+	mainWindow.canvas = NewCanvas(nil, nil, mainWindow) // Pass mainWindow for state access
 
 	// 修改树形结构的创建
 	mainWindow.leftBar = widget.NewTree(
@@ -96,20 +95,17 @@ func InitMainWindow(window fyne.Window) *MainWindow {
 			}
 
 			// 根据状态设置按钮
-			if currentAddedTable == tableName {
+			if mainWindow.currentAddedTable == tableName {
 				btn.SetText("Cancel")
 				btn.OnTapped = func() {
-					// 清空设计区域
 					mainWindow.canvas.Clear()
-					// 重置状态
-					currentAddedTable = ""
-					firstTable = true
-					// 刷新树以更新所有按钮
+					mainWindow.currentAddedTable = ""
+					mainWindow.firstTable = true
 					mainWindow.leftBar.Refresh()
 				}
 			} else {
 				btn.SetText("Add")
-				if firstTable || currentAddedTable == "" {
+				if mainWindow.firstTable || mainWindow.currentAddedTable == "" {
 					btn.Show()
 				} else {
 					btn.Hide()
@@ -123,10 +119,8 @@ func InitMainWindow(window fyne.Window) *MainWindow {
 					mainWindow.canvas.AddTable(tableName, columns)
 					mainWindow.window.Canvas().Refresh(mainWindow.canvas.container)
 
-					// 更新状态
-					currentAddedTable = tableName
-					firstTable = false
-					// 刷新树以更新所有按钮
+					mainWindow.currentAddedTable = tableName
+					mainWindow.firstTable = false
 					mainWindow.leftBar.Refresh()
 				}
 			}
@@ -223,8 +217,12 @@ func (m *MainWindow) connectToDatabase() {
 	}
 
 	m.dbService = dbService
-	// 修改 connectToDatabase 中的画布重新创建部分
-	m.canvas = NewCanvas(dbService, m.dbConfig)
+	// Reset state when connecting to new database
+	m.firstTable = true
+	m.currentAddedTable = ""
+	
+	// Create new canvas with proper initialization
+	m.canvas = NewCanvas(dbService, m.dbConfig, m)
 	m.canvas.container.Resize(fyne.NewSize(800, 600))
 
 	// 刷新中间容器

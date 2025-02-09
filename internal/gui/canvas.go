@@ -25,6 +25,7 @@ type Canvas struct {
 	content          *fyne.Container         // 添加一个主内容容器
 	layout           *CanvasLayout           // 使用组合而不是继承
 	tempConnection   *TableConnection
+	mainWindow       *MainWindow // Add reference to main window for state access
 }
 
 // 创建一个可拖动的容器
@@ -587,12 +588,18 @@ func (c *Canvas) updateTableDisplay(node *TableNode) {
 
 // AddTable 添加一个新的表到画布
 func (c *Canvas) AddTable(tableName string, columns []string) {
-	// 检查表是否已存在
+	// Validate required services are available
+	if c.dbService == nil {
+		dialog.ShowError(fmt.Errorf("Database service not initialized"), fyne.CurrentApp().Driver().AllWindows()[0])
+		return
+	}
+
+	// Check if table already exists
 	if _, exists := c.tables[tableName]; exists {
 		return
 	}
 
-	// 创建表节点
+	// Create table node with proper service references
 	node := &TableNode{
 		container: NewDraggableContainer(),
 		rect: &canvas.Rectangle{
@@ -602,6 +609,7 @@ func (c *Canvas) AddTable(tableName string, columns []string) {
 		},
 		name:        canvas.NewText(tableName, color.Black),
 		showColumns: true,
+		dbService:   c.dbService, // Pass database service reference
 	}
 
 	// 设置表格容器大小
@@ -673,7 +681,7 @@ func (c *Canvas) AddTable(tableName string, columns []string) {
 	columnsPadded := container.NewPadded(columnsContainer)
 
 	// 创建堆叠容器（矩形和列）
-	stackContainer := container.NewStack(
+	stackContainer = container.NewStack(
 		node.rect,
 		container.NewPadded(
 			container.NewVBox(
@@ -684,7 +692,7 @@ func (c *Canvas) AddTable(tableName string, columns []string) {
 	)
 
 	// 创建主容器
-	mainContainer := container.NewVBox(
+	mainContainer = container.NewVBox(
 		headerContainer,
 		stackContainer,
 	)
@@ -753,40 +761,42 @@ func createColumnItem(name string, canvas *Canvas, tableName string) *ColumnItem
 	}
 }
 
-func NewCanvas(dbService service.DatabaseService, dbConfig *model.DatabaseConfig) *Canvas {
-	// 创建画布实例
+func NewCanvas(dbService service.DatabaseService, dbConfig *model.DatabaseConfig, mainWindow *MainWindow) *Canvas {
+	if mainWindow == nil {
+		panic("MainWindow reference cannot be nil")
+	}
+
 	c := &Canvas{
 		tables:      make(map[string]*TableNode),
 		dbService:   dbService,
 		dbConfig:    dbConfig,
 		connections: make([]*TableConnection, 0),
 		content:     container.NewWithoutLayout(),
-		layout:      &CanvasLayout{},
+		layout:      &CanvasLayout{
+			tableDepths: make(map[string]int),
+			tableRows:   make(map[string]int),
+		},
+		mainWindow: mainWindow,
 	}
 
-	// 创建可拖动容器并确保初始化
+	// Create draggable container with proper initialization
 	c.container = NewDraggableContainer()
+	if c.container == nil {
+		panic("Failed to create draggable container")
+	}
 
-	// 创建背景
+	// Create and setup background
 	background := &canvas.Rectangle{
 		FillColor: color.NRGBA{R: 255, G: 255, B: 255, A: 255},
 	}
 	background.Resize(fyne.NewSize(800, 600))
 
-	// 设置容器大小
+	// Initialize containers with proper sizes
 	c.container.Resize(fyne.NewSize(800, 600))
 	c.content.Resize(fyne.NewSize(800, 600))
 
-	// 添加背景到内容容器
 	c.content.Add(background)
-
-	// 将内容容器添加到可拖动容器
 	c.container.content.Add(c.content)
-
-	// 确保所有容器都被正确初始化
-	if c.container == nil || c.container.content == nil {
-		panic("Failed to initialize canvas containers")
-	}
 
 	return c
 }
